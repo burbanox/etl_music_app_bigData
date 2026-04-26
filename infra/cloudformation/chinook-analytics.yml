@@ -1,0 +1,558 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Chinook analytics lakehouse with S3, Glue, Athena, jobs, triggers and catalog tables.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: chinook
+  AnalyticsBucketName:
+    Type: String
+    Description: Globally unique S3 bucket name for scripts, curated data and Athena results.
+  AthenaDatabaseName:
+    Type: String
+    Default: chinook_analytics
+  CuratedPrefix:
+    Type: String
+    Default: curated/chinook
+  ScriptsPrefix:
+    Type: String
+    Default: jobs/glue
+  AthenaResultsPrefix:
+    Type: String
+    Default: athena/results
+  JdbcConnectionName:
+    Type: String
+    Default: chinook-postgres
+  JdbcUrl:
+    Type: String
+    Description: JDBC URL for the transactional PostgreSQL database, for example jdbc:postgresql://host:5432/chinook.
+  JdbcUsername:
+    Type: String
+    NoEcho: true
+  JdbcPassword:
+    Type: String
+    NoEcho: true
+  GlueSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet with network access to the PostgreSQL database.
+  GlueSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group allowed to reach PostgreSQL.
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability zone of the selected subnet.
+  DimDateStartDate:
+    Type: String
+    Default: "2009-01-01"
+  DimDateEndDate:
+    Type: String
+    Default: "2030-12-31"
+
+Resources:
+  AnalyticsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AnalyticsBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-analytics-glue-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: !Sub ${ProjectName}-analytics-s3-athena-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub arn:aws:s3:::${AnalyticsBucketName}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${AnalyticsBucketName}
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:BatchCreatePartition
+                  - glue:BatchUpdatePartition
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                Resource: "*"
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref AthenaDatabaseName
+        Description: Chinook analytics database for Athena and Power BI.
+
+  GlueJdbcConnection:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      ConnectionInput:
+        Name: !Ref JdbcConnectionName
+        Description: JDBC connection to Chinook transactional PostgreSQL.
+        ConnectionType: JDBC
+        ConnectionProperties:
+          JDBC_CONNECTION_URL: !Ref JdbcUrl
+          USERNAME: !Ref JdbcUsername
+          PASSWORD: !Ref JdbcPassword
+        PhysicalConnectionRequirements:
+          AvailabilityZone: !Ref AvailabilityZone
+          SecurityGroupIdList:
+            - !Ref GlueSecurityGroupId
+          SubnetId: !Ref GlueSubnetId
+
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub ${ProjectName}-analytics
+      Description: Athena workgroup for Chinook analytics queries.
+      RecursiveDeleteOption: true
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub s3://${AnalyticsBucketName}/${AthenaResultsPrefix}/
+
+  DimCustomerTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: dim_customer
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/dim_customer/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: customerkey
+              Type: int
+            - Name: firstname
+              Type: string
+            - Name: lastname
+              Type: string
+            - Name: company
+              Type: string
+            - Name: country
+              Type: string
+            - Name: city
+              Type: string
+            - Name: state
+              Type: string
+            - Name: email
+              Type: string
+
+  DimTrackTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: dim_track
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/dim_track/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: trackkey
+              Type: int
+            - Name: name
+              Type: string
+            - Name: album
+              Type: string
+            - Name: artist
+              Type: string
+            - Name: genre
+              Type: string
+            - Name: mediatype
+              Type: string
+            - Name: composer
+              Type: string
+            - Name: milliseconds
+              Type: int
+
+  DimDateTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: dim_date
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+          projection.enabled: "true"
+          projection.partition_year.type: integer
+          projection.partition_year.range: "2009,2030"
+          projection.partition_month.type: integer
+          projection.partition_month.range: "1,12"
+          projection.partition_day.type: integer
+          projection.partition_day.range: "1,31"
+          storage.location.template: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/dim_date/partition_year=${!partition_year}/partition_month=${!partition_month}/partition_day=${!partition_day}/
+        PartitionKeys:
+          - Name: partition_year
+            Type: int
+          - Name: partition_month
+            Type: int
+          - Name: partition_day
+            Type: int
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/dim_date/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: datekey
+              Type: int
+            - Name: fulldate
+              Type: string
+            - Name: year
+              Type: int
+            - Name: quarter
+              Type: int
+            - Name: month
+              Type: int
+            - Name: day
+              Type: int
+            - Name: dayofweek
+              Type: string
+            - Name: isholiday
+              Type: boolean
+
+  FactSalesTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: fact_sales
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+          projection.enabled: "true"
+          projection.partition_year.type: integer
+          projection.partition_year.range: "2009,2030"
+          projection.partition_month.type: integer
+          projection.partition_month.range: "1,12"
+          projection.partition_day.type: integer
+          projection.partition_day.range: "1,31"
+          storage.location.template: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/fact_sales/partition_year=${!partition_year}/partition_month=${!partition_month}/partition_day=${!partition_day}/
+        PartitionKeys:
+          - Name: partition_year
+            Type: int
+          - Name: partition_month
+            Type: int
+          - Name: partition_day
+            Type: int
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/fact_sales/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: customerkey
+              Type: int
+            - Name: trackkey
+              Type: int
+            - Name: invoicedatekey
+              Type: int
+            - Name: employeekey
+              Type: int
+            - Name: quantity
+              Type: int
+            - Name: unitprice
+              Type: decimal(10,2)
+            - Name: totalamount
+              Type: decimal(10,2)
+
+  CustomerHistoryTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: customer_history
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+        PartitionKeys:
+          - Name: snapshot_date
+            Type: date
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/customer_history/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: customer_id
+              Type: int
+            - Name: first_name
+              Type: string
+            - Name: last_name
+              Type: string
+            - Name: company
+              Type: string
+            - Name: address
+              Type: string
+            - Name: city
+              Type: string
+            - Name: state
+              Type: string
+            - Name: country
+              Type: string
+            - Name: postal_code
+              Type: string
+            - Name: phone
+              Type: string
+            - Name: fax
+              Type: string
+            - Name: email
+              Type: string
+            - Name: support_rep_id
+              Type: int
+
+  EmployeeReportsHistoryTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref AthenaDatabaseName
+      TableInput:
+        Name: employee_reports_history
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          EXTERNAL: "TRUE"
+        PartitionKeys:
+          - Name: snapshot_date
+            Type: date
+        StorageDescriptor:
+          Location: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/employee_reports_history/
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          Columns:
+            - Name: employeekey
+              Type: int
+            - Name: firstname
+              Type: string
+            - Name: lastname
+              Type: string
+            - Name: title
+              Type: string
+            - Name: reportstoemployeekey
+              Type: int
+            - Name: reportstoname
+              Type: string
+
+  DimensionsJob:
+    Type: AWS::Glue::Job
+    DependsOn: GlueJdbcConnection
+    Properties:
+      Name: chinook-dimensions-visual
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/dimensions_visual.py
+      DefaultArguments:
+        "--job-language": python
+        "--enable-glue-datacatalog": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--SOURCE_CONNECTION_NAME": !Ref JdbcConnectionName
+        "--TARGET_DATABASE": !Ref AthenaDatabaseName
+        "--TARGET_BUCKET": !Ref AnalyticsBucketName
+        "--CURATED_PREFIX": !Ref CuratedPrefix
+      Connections:
+        Connections:
+          - !Ref JdbcConnectionName
+
+  FactSalesJob:
+    Type: AWS::Glue::Job
+    DependsOn: GlueJdbcConnection
+    Properties:
+      Name: chinook-fact-sales-visual
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/fact_sales_visual.py
+      DefaultArguments:
+        "--job-language": python
+        "--enable-glue-datacatalog": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--SOURCE_CONNECTION_NAME": !Ref JdbcConnectionName
+        "--TARGET_DATABASE": !Ref AthenaDatabaseName
+        "--TARGET_BUCKET": !Ref AnalyticsBucketName
+        "--CURATED_PREFIX": !Ref CuratedPrefix
+      Connections:
+        Connections:
+          - !Ref JdbcConnectionName
+
+  DimDateJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: chinook-dim-date-python
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/dim_date_job.py
+      DefaultArguments:
+        "--job-language": python
+        "--enable-glue-datacatalog": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--additional-python-modules": holidays
+        "--TARGET_DATABASE": !Ref AthenaDatabaseName
+        "--TARGET_BUCKET": !Ref AnalyticsBucketName
+        "--CURATED_PREFIX": !Ref CuratedPrefix
+        "--START_DATE": !Ref DimDateStartDate
+        "--END_DATE": !Ref DimDateEndDate
+
+  FullCopyHistoryJob:
+    Type: AWS::Glue::Job
+    DependsOn: GlueJdbcConnection
+    Properties:
+      Name: chinook-full-copy-history
+      Role: !GetAtt GlueServiceRole.Arn
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/full_copy_history.py
+      DefaultArguments:
+        "--job-language": python
+        "--enable-glue-datacatalog": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--SOURCE_CONNECTION_NAME": !Ref JdbcConnectionName
+        "--TARGET_DATABASE": !Ref AthenaDatabaseName
+        "--TARGET_BUCKET": !Ref AnalyticsBucketName
+        "--CURATED_PREFIX": !Ref CuratedPrefix
+      Connections:
+        Connections:
+          - !Ref JdbcConnectionName
+
+  DimensionsHourlyTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: chinook-dimensions-hourly
+      Type: SCHEDULED
+      Description: Refresh dimensions every hour.
+      Schedule: cron(0 * * * ? *)
+      StartOnCreation: true
+      Actions:
+        - JobName: !Ref DimensionsJob
+
+  FactSalesFrequentTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: chinook-fact-sales-every-15-min
+      Type: SCHEDULED
+      Description: Refresh facts every 15 minutes.
+      Schedule: cron(0/15 * * * ? *)
+      StartOnCreation: true
+      Actions:
+        - JobName: !Ref FactSalesJob
+
+  FullCopyDailyTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: chinook-full-copy-history-daily
+      Type: SCHEDULED
+      Description: Snapshot customer and employee reporting history daily.
+      Schedule: cron(0 5 * * ? *)
+      StartOnCreation: true
+      Actions:
+        - JobName: !Ref FullCopyHistoryJob
+
+Outputs:
+  AnalyticsBucket:
+    Value: !Ref AnalyticsBucket
+  GlueRoleArn:
+    Value: !GetAtt GlueServiceRole.Arn
+  GlueDatabase:
+    Value: !Ref AthenaDatabaseName
+  JdbcConnection:
+    Value: !Ref GlueJdbcConnection
+  AthenaWorkGroup:
+    Value: !Ref AthenaWorkGroup
+  ScriptUploadPrefix:
+    Value: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/
+  CuratedDataPrefix:
+    Value: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/

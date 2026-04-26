@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Create .env
+        run: |
+          touch .env
+          echo "AWS_REGION=${{ vars.AWS_REGION || 'us-east-1' }}" >> .env
+          echo "PROJECT_NAME=${{ vars.PROJECT_NAME || 'chinook' }}" >> .env
+          echo "CFN_STACK_NAME=${{ vars.CFN_STACK_NAME || 'chinook-analytics' }}" >> .env
+          echo "ANALYTICS_BUCKET=${{ vars.ANALYTICS_BUCKET }}" >> .env
+          echo "ATHENA_DATABASE=${{ vars.ATHENA_DATABASE || 'chinook_analytics' }}" >> .env
+          echo "GLUE_ROLE_ARN=${{ vars.GLUE_ROLE_ARN }}" >> .env
+          echo "GLUE_JDBC_CONNECTION_NAME=${{ vars.GLUE_JDBC_CONNECTION_NAME || 'chinook-postgres' }}" >> .env
+          echo "JDBC_URL=${{ vars.JDBC_URL }}" >> .env
+          echo "JDBC_USERNAME=${{ secrets.JDBC_USERNAME }}" >> .env
+          echo "JDBC_PASSWORD=${{ secrets.JDBC_PASSWORD }}" >> .env
+          echo "GLUE_SUBNET_ID=${{ vars.GLUE_SUBNET_ID }}" >> .env
+          echo "GLUE_SECURITY_GROUP_ID=${{ vars.GLUE_SECURITY_GROUP_ID }}" >> .env
+          echo "GLUE_AVAILABILITY_ZONE=${{ vars.GLUE_AVAILABILITY_ZONE }}" >> .env
+      - name: Deploy analytics lakehouse
+        run: python -m chinook_analytics.deploy
