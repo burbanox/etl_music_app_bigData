@@ -33,7 +33,15 @@ def put_athena_ddl(athena_client, config: AnalyticsConfig, ddl: str) -> None:
     )
 
 
-def create_or_update_job(glue_client, *, name: str, script_location: str, config: AnalyticsConfig) -> None:
+def create_or_update_job(
+    glue_client,
+    *,
+    name: str,
+    script_location: str,
+    config: AnalyticsConfig,
+    extra_default_args: dict[str, str] | None = None,
+    uses_jdbc_connection: bool = False,
+) -> None:
     command = {"Name": "glueetl", "ScriptLocation": script_location, "PythonVersion": "3"}
     default_args = {
         "--job-language": "python",
@@ -46,6 +54,8 @@ def create_or_update_job(glue_client, *, name: str, script_location: str, config
         "--START_DATE": config.dim_date_start_date,
         "--END_DATE": config.dim_date_end_date,
     }
+    if extra_default_args:
+        default_args.update(extra_default_args)
     job_definition = {
         "Role": config.glue_role_arn,
         "Command": command,
@@ -55,6 +65,8 @@ def create_or_update_job(glue_client, *, name: str, script_location: str, config
         "WorkerType": "G.1X",
         "ExecutionProperty": {"MaxConcurrentRuns": 1},
     }
+    if uses_jdbc_connection:
+        job_definition["Connections"] = {"Connections": [config.jdbc_connection_name]}
     try:
         glue_client.get_job(JobName=name)
         glue_client.update_job(JobName=name, JobUpdate=job_definition)
@@ -98,12 +110,29 @@ def deploy(config: AnalyticsConfig) -> None:
     ensure_bucket(s3_client, config.bucket, config.region)
 
     scripts = {
-        "chinook-dimensions-visual": ROOT / "jobs/glue/dimensions_visual.py",
-        "chinook-fact-sales-visual": ROOT / "jobs/glue/fact_sales_visual.py",
-        "chinook-dim-date-python": ROOT / "jobs/glue/dim_date_job.py",
-        "chinook-full-copy-history": ROOT / "jobs/glue/full_copy_history.py",
+        "chinook-dimensions-visual": {
+            "path": ROOT / "jobs/glue/dimensions_visual.py",
+            "extra_args": {},
+            "uses_jdbc_connection": True,
+        },
+        "chinook-fact-sales-visual": {
+            "path": ROOT / "jobs/glue/fact_sales_visual.py",
+            "extra_args": {},
+            "uses_jdbc_connection": True,
+        },
+        "chinook-dim-date-python": {
+            "path": ROOT / "jobs/glue/dim_date_job.py",
+            "extra_args": {"--additional-python-modules": "holidays"},
+            "uses_jdbc_connection": False,
+        },
+        "chinook-full-copy-history": {
+            "path": ROOT / "jobs/glue/full_copy_history.py",
+            "extra_args": {},
+            "uses_jdbc_connection": True,
+        },
     }
-    for job_name, script_path in scripts.items():
+    for job_name, job_config in scripts.items():
+        script_path = job_config["path"]
         key = f"{config.scripts_prefix.rstrip('/')}/{script_path.name}"
         upload_file(s3_client, config.bucket, key, script_path)
         create_or_update_job(
@@ -111,6 +140,8 @@ def deploy(config: AnalyticsConfig) -> None:
             name=job_name,
             script_location=f"s3://{config.bucket}/{key}",
             config=config,
+            extra_default_args=job_config["extra_args"],
+            uses_jdbc_connection=job_config["uses_jdbc_connection"],
         )
 
     ddl_template = (ROOT / "sql/athena_ddl.sql").read_text(encoding="utf-8")

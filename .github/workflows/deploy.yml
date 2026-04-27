@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -38,6 +38,8 @@ jobs:
           echo "JDBC_PASSWORD=${{ secrets.JDBC_PASSWORD }}" >> .env
           echo "GLUE_SUBNET_ID=${{ vars.GLUE_SUBNET_ID }}" >> .env
           echo "GLUE_SECURITY_GROUP_ID=${{ vars.GLUE_SECURITY_GROUP_ID }}" >> .env
+          echo "GLUE_VPC_ID=${{ vars.GLUE_VPC_ID }}" >> .env
+          echo "GLUE_ROUTE_TABLE_ID=${{ vars.GLUE_ROUTE_TABLE_ID }}" >> .env
           echo "GLUE_AVAILABILITY_ZONE=${{ vars.GLUE_AVAILABILITY_ZONE }}" >> .env
       - name: Deploy analytics lakehouse
         run: python -m chinook_analytics.deploy

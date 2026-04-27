@@ -36,7 +36,7 @@ Antes de ejecutar los jobs crea en Glue una conexión JDBC a PostgreSQL llamada 
 
 ## Infraestructura con CloudFormation
 
-La plantilla [chinook-analytics.yml](/home/harold_burbano/universidad/big_data/etl_project/infra/cloudformation/chinook-analytics.yml) crea S3, IAM Role, Glue Database, Glue Connection, Glue Tables, Glue Jobs, Glue Triggers y Athena WorkGroup.
+La plantilla [chinook-analytics.yml](/home/harold_burbano/universidad/big_data/etl_project/infra/cloudformation/chinook-analytics.yml) crea S3, Glue Database, Glue Connection, Glue Tables, Glue Jobs, Glue Triggers y Athena WorkGroup. En Learner Lab usa un rol existente, normalmente `LabRole`, porque el laboratorio suele bloquear `iam:CreateRole`.
 
 ```bash
 aws cloudformation deploy \
@@ -45,11 +45,14 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     AnalyticsBucketName=mi-bucket-chinook-analytics \
+    GlueRoleArn=arn:aws:iam::<account-id>:role/LabRole \
     JdbcUrl=jdbc:postgresql://host:5432/chinook \
     JdbcUsername=usuario \
     JdbcPassword=clave \
     GlueSubnetId=subnet-xxxxxxxx \
     GlueSecurityGroupId=sg-xxxxxxxx \
+    GlueVpcId=vpc-xxxxxxxx \
+    GlueRouteTableId=rtb-xxxxxxxx \
     AvailabilityZone=us-east-1a
 ```
 

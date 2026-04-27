@@ -41,7 +41,9 @@ Luego edita `.env` y llena los valores.
 `GLUE_ROLE_ARN`
 
 - Qué es: ARN del rol IAM que Glue usa para leer PostgreSQL y escribir en S3.
-- Cómo conseguirlo: si usas CloudFormation, sale como output `GlueRoleArn`. Si lo haces manual, está en `IAM > Roles`.
+- Cómo conseguirlo: en AWS Academy Learner Lab normalmente debes usar un rol existente, casi siempre `LabRole`.
+- Por consola: ve a `IAM > Roles > LabRole` y copia el ARN.
+- Por CLI: `aws iam get-role --role-name LabRole --query 'Role.Arn' --output text`.
 - Dónde colocarlo: `.env`.
 
 `GLUE_JDBC_CONNECTION_NAME`
@@ -49,11 +51,12 @@ Luego edita `.env` y llena los valores.
 - Qué es: nombre de la conexión JDBC en Glue.
 - Puedes usar `chinook-postgres`.
 
-`GLUE_SUBNET_ID`, `GLUE_SECURITY_GROUP_ID`, `GLUE_AVAILABILITY_ZONE`
+`GLUE_SUBNET_ID`, `GLUE_SECURITY_GROUP_ID`, `GLUE_VPC_ID`, `GLUE_ROUTE_TABLE_ID`, `GLUE_AVAILABILITY_ZONE`
 
 - Qué son: red desde la que Glue podrá llegar a PostgreSQL.
-- Cómo conseguirlos: en `VPC > Subnets` y `EC2 > Security Groups`; la zona aparece en la subnet.
+- Cómo conseguirlos: en `VPC > Subnets`, `VPC > Route tables` y `EC2 > Security Groups`; la zona aparece en la subnet.
 - El security group debe permitir salida hacia PostgreSQL y el SG/base de datos debe permitir entrada al puerto `5432`.
+- `GLUE_ROUTE_TABLE_ID` se usa para crear un Gateway VPC Endpoint de S3. Glue lo necesita para leer scripts y escribir Parquet en S3 cuando corre dentro de una VPC.
 
 ## PostgreSQL Chinook
 

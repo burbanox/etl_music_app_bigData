@@ -20,6 +20,9 @@ Parameters:
   AthenaResultsPrefix:
     Type: String
     Default: athena/results
+  GlueRoleArn:
+    Type: String
+    Description: Existing IAM role ARN used by Glue jobs. In AWS Academy Learner Lab this is usually the LabRole ARN.
   JdbcConnectionName:
     Type: String
     Default: chinook-postgres
@@ -38,6 +41,12 @@ Parameters:
   GlueSecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group allowed to reach PostgreSQL.
+  GlueVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC that contains the Glue subnet and the PostgreSQL EC2 instance.
+  GlueRouteTableId:
+    Type: String
+    Description: Route table associated with the Glue subnet. Used by the S3 Gateway VPC endpoint.
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
     Description: Availability zone of the selected subnet.
@@ -64,48 +73,6 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-
-  GlueServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${ProjectName}-analytics-glue-role
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: glue.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
-      Policies:
-        - PolicyName: !Sub ${ProjectName}-analytics-s3-athena-access
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource: !Sub arn:aws:s3:::${AnalyticsBucketName}/*
-              - Effect: Allow
-                Action:
-                  - s3:ListBucket
-                Resource: !Sub arn:aws:s3:::${AnalyticsBucketName}
-              - Effect: Allow
-                Action:
-                  - glue:GetDatabase
-                  - glue:GetDatabases
-                  - glue:GetTable
-                  - glue:GetTables
-                  - glue:CreateTable
-                  - glue:UpdateTable
-                  - glue:BatchCreatePartition
-                  - glue:BatchUpdatePartition
-                  - glue:GetPartition
-                  - glue:GetPartitions
-                Resource: "*"
 
   GlueDatabase:
     Type: AWS::Glue::Database
@@ -145,6 +112,28 @@ Resources:
         PublishCloudWatchMetricsEnabled: true
         ResultConfiguration:
           OutputLocation: !Sub s3://${AnalyticsBucketName}/${AthenaResultsPrefix}/
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      VpcId: !Ref GlueVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - !Ref GlueRouteTableId
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !Sub arn:aws:s3:::${AnalyticsBucketName}
+              - !Sub arn:aws:s3:::${AnalyticsBucketName}/*
 
   DimCustomerTable:
     Type: AWS::Glue::Table
@@ -407,7 +396,7 @@ Resources:
     DependsOn: GlueJdbcConnection
     Properties:
       Name: chinook-dimensions-visual
-      Role: !GetAtt GlueServiceRole.Arn
+      Role: !Ref GlueRoleArn
       GlueVersion: "4.0"
       WorkerType: G.1X
       NumberOfWorkers: 2
@@ -434,7 +423,7 @@ Resources:
     DependsOn: GlueJdbcConnection
     Properties:
       Name: chinook-fact-sales-visual
-      Role: !GetAtt GlueServiceRole.Arn
+      Role: !Ref GlueRoleArn
       GlueVersion: "4.0"
       WorkerType: G.1X
       NumberOfWorkers: 2
@@ -460,7 +449,7 @@ Resources:
     Type: AWS::Glue::Job
     Properties:
       Name: chinook-dim-date-python
-      Role: !GetAtt GlueServiceRole.Arn
+      Role: !Ref GlueRoleArn
       GlueVersion: "4.0"
       WorkerType: G.1X
       NumberOfWorkers: 2
@@ -486,7 +475,7 @@ Resources:
     DependsOn: GlueJdbcConnection
     Properties:
       Name: chinook-full-copy-history
-      Role: !GetAtt GlueServiceRole.Arn
+      Role: !Ref GlueRoleArn
       GlueVersion: "4.0"
       WorkerType: G.1X
       NumberOfWorkers: 2
@@ -545,7 +534,7 @@ Outputs:
   AnalyticsBucket:
     Value: !Ref AnalyticsBucket
   GlueRoleArn:
-    Value: !GetAtt GlueServiceRole.Arn
+    Value: !Ref GlueRoleArn
   GlueDatabase:
     Value: !Ref AthenaDatabaseName
   JdbcConnection:
@@ -556,3 +545,5 @@ Outputs:
     Value: !Sub s3://${AnalyticsBucketName}/${ScriptsPrefix}/
   CuratedDataPrefix:
     Value: !Sub s3://${AnalyticsBucketName}/${CuratedPrefix}/
+  S3GatewayEndpointId:
+    Value: !Ref S3GatewayEndpoint

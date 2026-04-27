@@ -80,12 +80,15 @@ class CloudFormationConfig:
     curated_prefix: str
     scripts_prefix: str
     athena_results_prefix: str
+    glue_role_arn: str
     jdbc_connection_name: str
     jdbc_url: str
     jdbc_username: str
     jdbc_password: str
     glue_subnet_id: str
     glue_security_group_id: str
+    glue_vpc_id: str
+    glue_route_table_id: str
     availability_zone: str
     dim_date_start_date: str
     dim_date_end_date: str
@@ -99,12 +102,15 @@ class CloudFormationConfig:
             "CuratedPrefix": self.curated_prefix,
             "ScriptsPrefix": self.scripts_prefix,
             "AthenaResultsPrefix": self.athena_results_prefix,
+            "GlueRoleArn": self.glue_role_arn,
             "JdbcConnectionName": self.jdbc_connection_name,
             "JdbcUrl": self.jdbc_url,
             "JdbcUsername": self.jdbc_username,
             "JdbcPassword": self.jdbc_password,
             "GlueSubnetId": self.glue_subnet_id,
             "GlueSecurityGroupId": self.glue_security_group_id,
+            "GlueVpcId": self.glue_vpc_id,
+            "GlueRouteTableId": self.glue_route_table_id,
             "AvailabilityZone": self.availability_zone,
             "DimDateStartDate": self.dim_date_start_date,
             "DimDateEndDate": self.dim_date_end_date,
@@ -120,12 +126,15 @@ class CloudFormationConfig:
             "curated_prefix": self.curated_prefix,
             "scripts_prefix": self.scripts_prefix,
             "athena_results_prefix": self.athena_results_prefix,
+            "glue_role_arn": self.glue_role_arn,
             "jdbc_connection_name": self.jdbc_connection_name,
             "jdbc_url": self.jdbc_url,
             "jdbc_username": self.jdbc_username,
             "jdbc_password": "***",
             "glue_subnet_id": self.glue_subnet_id,
             "glue_security_group_id": self.glue_security_group_id,
+            "glue_vpc_id": self.glue_vpc_id,
+            "glue_route_table_id": self.glue_route_table_id,
             "availability_zone": self.availability_zone,
             "dim_date_start_date": self.dim_date_start_date,
             "dim_date_end_date": self.dim_date_end_date,
@@ -143,12 +152,15 @@ def load_cloudformation_config() -> CloudFormationConfig:
         curated_prefix=os.getenv("CURATED_PREFIX", "curated/chinook"),
         scripts_prefix=os.getenv("SCRIPTS_PREFIX", "jobs/glue"),
         athena_results_prefix=os.getenv("ATHENA_RESULTS_PREFIX", "athena/results"),
+        glue_role_arn=required_env("GLUE_ROLE_ARN"),
         jdbc_connection_name=os.getenv("GLUE_JDBC_CONNECTION_NAME", "chinook-postgres"),
         jdbc_url=required_env("JDBC_URL"),
         jdbc_username=required_env("JDBC_USERNAME"),
         jdbc_password=required_env("JDBC_PASSWORD"),
         glue_subnet_id=required_env("GLUE_SUBNET_ID"),
         glue_security_group_id=required_env("GLUE_SECURITY_GROUP_ID"),
+        glue_vpc_id=os.getenv("GLUE_VPC_ID", ""),
+        glue_route_table_id=os.getenv("GLUE_ROUTE_TABLE_ID", ""),
         availability_zone=required_env("GLUE_AVAILABILITY_ZONE"),
         dim_date_start_date=os.getenv("DIM_DATE_START_DATE", "2009-01-01"),
         dim_date_end_date=os.getenv("DIM_DATE_END_DATE", "2030-12-31"),
